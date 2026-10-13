@@ -103,10 +103,11 @@ const CATS = ['Comida', 'Taxi', 'Otro'];
 function calc(st = S, excludeId = null) {
   const R = st.records.filter(r => r.id !== excludeId);
   const c = { aportado: 0, cambiado: 0, gastoUSDT: 0, mon: {}, cat: {}, tipo: { comp: 0, p1: 0, p2: 0 }, p: { p1: { pers: 0, comp: 0 }, p2: { pers: 0, comp: 0 } }, eq: {}, total: 0 };
-  MONEDAS.forEach(m => c.mon[m] = { rec: 0, costo: 0, gas: 0, tasa: 0, saldo: 0, eq: 0 });
+  MONEDAS.forEach(m => c.mon[m] = { rec: 0, costo: 0, gas: 0, tasa: 0, saldo: 0, eq: 0, aj: 0 });
   CATS.forEach(k => c.cat[k] = 0);
   R.forEach(r => {
     if (r.type === 'aporte') c.aportado += r.usdt;
+    else if (r.type === 'ajuste') c.mon[r.moneda].aj += r.monto;
     else if (r.type === 'cambio') { const m = c.mon[r.moneda]; m.rec += r.local; m.costo += r.usdt + (r.com || 0); c.cambiado += r.usdt + (r.com || 0); }
   });
   MONEDAS.forEach(m => { const o = c.mon[m]; o.tasa = o.costo > 0 ? o.rec / o.costo : 0; });
@@ -120,7 +121,7 @@ function calc(st = S, excludeId = null) {
     c.tipo[r.tipo] += e;
     if (r.tipo === 'comp') { c.p.p1.comp += e / 2; c.p.p2.comp += e / 2; } else c.p[r.tipo].pers += e;
   });
-  MONEDAS.forEach(m => { const o = c.mon[m]; o.saldo = o.rec - o.gas; });
+  MONEDAS.forEach(m => { const o = c.mon[m]; o.saldo = o.rec - o.gas + o.aj; });
   c.restante = c.aportado - c.cambiado - c.gastoUSDT; // USDT sin cambiar ni gastar
   c.restanteSinCambiar = c.aportado - c.cambiado;
   return c;
@@ -154,7 +155,7 @@ function vPanel() {
   const c = calc(), u = S.settings.umbral;
   let h = '';
   if (c.restante < u) h += `<div class="alert">⚠️ Fondo bajo: quedan ${fmt(c.restante)} USDT (umbral ${fmt(u)}).</div>`;
-  h += `<div class="grid3"><button class="btn a" onclick="formAporte()">+ Aporte</button><button class="btn c" onclick="formCambio()">⇄ Cambio</button><button class="btn g" onclick="formGasto()">− Gasto</button></div>`;
+  h += `<div class="grid3"><button class="btn a" onclick="formAporte()">+ Aporte</button><button class="btn c" onclick="formCambio()">⇄ Cambio</button><button class="btn g" onclick="formGasto()">− Gasto</button></div><button class="btn sec full" style="margin:-4px 0 12px" onclick="formAjuste()">± Ajuste de saldo (no es gasto)</button>`;
   h += `<div class="card"><h2>Fondo en USDT</h2>
     <div class="row"><span>Total aportado</span><b>${fmt(c.aportado)}</b></div>
     <div class="row"><span>Total cambiado</span><b>${fmt(c.cambiado)}</b></div>
@@ -166,6 +167,7 @@ function vPanel() {
       <div class="row"><span>Total recibido</span><b>${fmt(o.rec)} ${m}</b></div>
       <div class="row"><span>Tasa prom. ponderada</span><b>${fmtRate(o.tasa)} ${m}/USDT</b></div>
       <div class="row"><span>Total gastado</span><b>${fmt(o.gas)} ${m}</b></div>
+      ${o.aj ? `<div class="row"><span>Ajustes de saldo</span><b>${o.aj > 0 ? '+' : ''}${fmt(o.aj)} ${m}</b></div>` : ''}
       <div class="row"><span>Equiv. gastado</span><b>${fmt(o.eq)} USDT</b></div>
       <div class="row"><span>Saldo disponible en mano</span><span class="big ${o.saldo < 0 ? 'neg' : ''}" style="font-size:24px">${fmt(o.saldo)} ${m}</span></div></div>`;
   });
@@ -202,20 +204,21 @@ function sel(id, opts, val) { return `<select onchange="F.${id}=this.value;rende
 function vMovs() {
   const c = calc(), list = filtrados();
   let h = `<div class="card"><div class="filters">
-    ${sel('type', [['', 'Todos los registros'], ['aporte', 'Aportes'], ['cambio', 'Cambios'], ['gasto', 'Gastos']], F.type)}
+    ${sel('type', [['', 'Todos los registros'], ['aporte', 'Aportes'], ['cambio', 'Cambios'], ['gasto', 'Gastos'], ['ajuste', 'Ajustes']], F.type)}
     ${sel('tipo', [['', 'Todo tipo de gasto'], ['comp', 'Compartido'], ['p1', 'Personal ' + S.settings.p1], ['p2', 'Personal ' + S.settings.p2]], F.tipo)}
     ${sel('persona', [['', 'Todas las personas'], ['p1', S.settings.p1], ['p2', S.settings.p2]], F.persona)}
     ${sel('cat', [['', 'Toda categoría'], ...CATS.map(k => [k, k])], F.cat)}
     ${sel('moneda', [['', 'Toda moneda'], ['USDT', 'USDT'], ['COP', 'COP'], ['VES', 'VES']], F.moneda)}
     <button class="btn sec" style="min-height:0;padding:8px" onclick="F={type:'',tipo:'',persona:'',cat:'',moneda:''};render()">Limpiar</button>
   </div><div class="hint">Persona = gastos propios + compartidos de esa persona.</div></div>`;
-  h += `<div class="grid3"><button class="btn a" onclick="formAporte()">+ Aporte</button><button class="btn c" onclick="formCambio()">⇄ Cambio</button><button class="btn g" onclick="formGasto()">− Gasto</button></div>`;
+  h += `<div class="grid3"><button class="btn a" onclick="formAporte()">+ Aporte</button><button class="btn c" onclick="formCambio()">⇄ Cambio</button><button class="btn g" onclick="formGasto()">− Gasto</button></div><button class="btn sec full" style="margin:-4px 0 12px" onclick="formAjuste()">± Ajuste de saldo (no es gasto)</button>`;
   h += `<div class="card">${list.length ? list.map(r => movHtml(r, c)).join('') : '<div class="hint">Sin movimientos.</div>'}</div>`;
   return h;
 }
 function movHtml(r, c) {
   let t, amt, sub = '';
   if (r.type === 'aporte') { t = '<span class="tag t-ap">Aporte</span>'; amt = `<span class="pos">+${fmt(r.usdt)} USDT</span>`; }
+  else if (r.type === 'ajuste') { t = '<span class="tag" style="background:var(--ambbg);color:var(--amb)">Ajuste de saldo</span>'; amt = `<span class="${r.monto > 0 ? 'pos' : 'neg'}">${r.monto > 0 ? '+' : '−'}${fmt(Math.abs(r.monto))} ${r.moneda}</span>`; }
   else if (r.type === 'cambio') {
     t = '<span class="tag t-cb">Cambio</span>'; amt = `${fmt(r.local)} ${r.moneda}`;
     sub = `${fmt(r.usdt)} USDT${r.com ? ` + ${fmt(r.com)} com.` : ''} · tasa ${fmtRate(r.local / (r.usdt + (r.com || 0)))}`;
@@ -226,7 +229,7 @@ function movHtml(r, c) {
   return `<div class="mov"><div><div>${t}</div><small>${fmtDate(r.ts)}${r.nota ? ' · ' + esc(r.nota) : ''}</small>${sub ? `<small>${sub}</small>` : ''}
     <div class="acts"><button onclick="editar('${r.id}')">Editar</button><button onclick="borrar('${r.id}')">Eliminar</button></div></div><div class="amt">${amt}</div></div>`;
 }
-function editar(id) { const r = S.records.find(x => x.id === id); if (r.type === 'aporte') formAporte(r); else if (r.type === 'cambio') formCambio(r); else formGasto(r); }
+function editar(id) { const r = S.records.find(x => x.id === id); if (r.type === 'aporte') formAporte(r); else if (r.type === 'ajuste') formAjuste(r); else if (r.type === 'cambio') formCambio(r); else formGasto(r); }
 function borrar(id) { if (!confirm('¿Eliminar este registro? No se puede deshacer.')) return; S.records = S.records.filter(r => r.id !== id); save(); render(); toast('Registro eliminado'); }
 
 /* ---------- formularios ---------- */
@@ -258,6 +261,14 @@ function prevTasa() {
   const u = num($('#f_usdt').value), l = num($('#f_local').value), k = num($('#f_com').value) || 0;
   $('#f_tasa').textContent = u > 0 && l > 0 ? `Tasa: ${fmtRate(l / (u + k))} por 1 USDT` : '';
 }
+function formAjuste(r) {
+  if (!monedasActivas().length && !r) return toast('Activa COP o VES en Ajustes');
+  cur = { type: 'ajuste', r };
+  const sale = r ? r.monto < 0 : true, radio = (v, cls, txt, on) => `<label><input type="radio" name="dir" value="${v}" ${on ? 'checked' : ''}><span class="${cls}">${txt}</span></label>`;
+  modal(head(r ? 'Editar ajuste' : 'Ajuste de saldo') + `<div class="hint">Mueve el saldo en moneda local sin contar como gasto de nadie. Ej.: abono al hotel (sale) y su devolución (entra).</div>
+    <label>Movimiento</label><div class="seg" style="grid-template-columns:1fr 1fr">${radio('out', 's-p2', 'Sale dinero', sale)}${radio('in', 's-n', 'Entra dinero', !sale)}</div>
+    <label>Monto</label><div style="display:grid;grid-template-columns:2fr 1fr;gap:8px"><input id="f_monto" inputmode="decimal" value="${r ? Math.abs(r.monto) : ''}">${fMon('f_mon', r && r.moneda)}</div>` + fNota(r, 'abono hotel, devolución hotel…') + fDate(r) + foot());
+}
 function formGasto(r) {
   cur = { type: 'gasto', r };
   const tp = r ? r.tipo : 'comp', cat = r ? r.cat : 'Comida';
@@ -281,6 +292,12 @@ function guardar() {
     if (rec.com < 0) return alert('La comisión no puede ser negativa.');
     if (rec.usdt + rec.com > c.restanteSinCambiar - c.gastoUSDT + EPS)
       return alert(`No puedes cambiar más USDT de los disponibles (${fmt(c.restante)} USDT).`);
+  } else if (cur.type === 'ajuste') {
+    const m = num($('#f_monto').value); rec.moneda = $('#f_mon').value;
+    if (!(m > 0)) return alert('Ingresa un monto mayor que 0.');
+    rec.monto = document.querySelector('input[name=dir]:checked').value === 'out' ? -m : m;
+    const disp = c.mon[rec.moneda].saldo;
+    if (rec.monto < 0 && m > disp + EPS && !confirm(`La salida (${fmt(m)} ${rec.moneda}) supera el saldo disponible (${fmt(disp)} ${rec.moneda}). ¿Registrar de todos modos?`)) return;
   } else {
     rec.monto = num($('#f_monto').value); rec.moneda = $('#f_mon').value;
     rec.tipo = document.querySelector('input[name=tipo]:checked').value; rec.cat = document.querySelector('input[name=cat]:checked').value;
@@ -362,6 +379,7 @@ function csvRows() {
   S.records.slice().sort((a, b) => a.ts.localeCompare(b.ts)).forEach(r => {
     const f = new Date(r.ts); f.setMinutes(f.getMinutes() - f.getTimezoneOffset()); const fecha = f.toISOString().slice(0, 16).replace('T', ' ');
     if (r.type === 'aporte') rows.push([fecha, 'Aporte', n(r.usdt), '', 'USDT', n(r.usdt), '', '', '', '', '', q(r.nota)]);
+    else if (r.type === 'ajuste') rows.push([fecha, 'Ajuste de saldo', '', '', r.moneda, n(r.monto), '', '', '', '', '', q(r.nota)]);
     else if (r.type === 'cambio') rows.push([fecha, 'Cambio', n(r.usdt), n(r.com || 0), r.moneda, n(r.local), n(r.local / (r.usdt + (r.com || 0))), '', '', '', '', q(r.nota)]);
     else {
       const e = c.eq[r.id] || 0, a = r.tipo === 'comp' ? e / 2 : r.tipo === 'p1' ? e : 0, b = r.tipo === 'comp' ? e / 2 : r.tipo === 'p2' ? e : 0;
